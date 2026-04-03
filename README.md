@@ -156,4 +156,25 @@ Upon first boot, the system securely creates a superuser.
 * Notice the system absolutely rejects the API call with a `422 Unprocessable Entity` error explicitly noting that dropping the wallet by ₹600 violates your mandatory ₹1,000 protective minimum balance!
 
 ---
+
+## 🗄️ 6. Inspecting the Database (SQLite Viewer)
+
+Because the project utilizes a lightweight **SQLite** database (`banking.db`) for local evaluation before rolling to PostgreSQL, you can easily inspect the live data using the **SQLite Viewer Extension** in VS Code (or any visual DB browser).
+
+### How To View The Data
+1. Install the **SQLite Viewer** extension in your IDE.
+2. Open the `banking.db` file generated in the root of the project directory.
+3. The extension will render an interactive visual table explorer.
+
+### What You Will Find Inside:
+The database rigidly splits data across multiple normalized tables.
+
+*   **`users` Table:** You'll find your `admin` account here. Observe the `hashed_password` column—it's scrambled with Bcrypt (e.g., `$2b$12$0PcxihnP...`).
+*   **`customers` Table:** Displays KYC data. Notice that `national_id_encrypted` is entirely scrambled utilizing Fernet symmetric cryptography (`gAAAAABpz5Ox...`). We also retain a `national_id_hash` utilized safely for duplicate detection!
+*   **`accounts` Table:** Observe the fundamental `balance_paise` logic (where 1,000 INR is stored literally as `100000`). Minimum limitations are hard-coded into `min_balance_paise`.
+*   **`transactions` Table:** Displays a massive ledger spanning from standard Digital Transfers to AML test deposits. Every element connects reliably back to an `account_id`. Failed records will show string reasons identifying exactly what rule was tripped (`failure_reason`).
+*   **`audit_logs` Table:** One of the most important elements mapping directly to compliance operations. You'll observe historic rows showing exactly *who* modified a user, what the `old_value` was, and what the `new_value` became.
+*   **`aml_flags` / `ctr_reports`:** Check these to see where the system successfully isolated massive test monetary dumps exceeding ₹10,00,000 automatically!
+
+---
 *Developed as a highly robust backend blueprint to demonstrate standard real-world banking logic applications using Python.*
