@@ -1,0 +1,52 @@
+
+=== Health ===
+  [PASS] GET /health -> HTTP 200
+
+=== Auth ===
+  [PASS] POST /api/auth/login -> HTTP 200
+  [FAIL] POST /api/auth/users (teller) -> HTTP 409
+         Body: {"detail":"Username already exists"}
+  [PASS] POST /api/auth/login (teller) -> HTTP 200
+
+=== KYC Onboarding ===
+  [FAIL] POST /api/customers/ (create) -> HTTP 409
+         Body: {"detail":"A customer with this National ID already exists."}
+  [PASS] POST /api/customers/ (under-18, expect 422) -> HTTP 422
+
+=== KYC Approval ===
+  [PASS] PATCH /kyc (verify) -> HTTP 200
+
+=== Accounts ===
+  [PASS] POST /api/accounts/ (savings) -> HTTP 201
+  [PASS] POST /api/accounts/ (below min, expect 422) -> HTTP 422
+  [PASS] POST /api/accounts/ (current) -> HTTP 201
+  [PASS] POST /api/accounts/ (FD) -> HTTP 201
+
+=== Balance & Transactions ===
+  [PASS] GET /api/accounts/{id}/balance -> HTTP 200
+  [PASS] POST /transactions/deposit (5,000) -> HTTP 201
+  [PASS] POST /transactions/withdraw (1,000) -> HTTP 201
+  [PASS] POST /transactions/withdraw (below min, expect 422) -> HTTP 422
+  [PASS] POST /transactions/deposit (AML > 10L) -> HTTP 201
+         AML flagged: True | CTR: True
+  [PASS] POST /transactions/transfer -> HTTP 201
+  [PASS] GET /transactions/account/{id} -> HTTP 200
+
+=== Account Status ===
+  [PASS] PATCH /accounts/{id}/status (freeze) -> HTTP 200
+  [PASS] POST /deposit on FROZEN account (expect 422) -> HTTP 422
+  [PASS] PATCH /accounts/{id}/status (unfreeze) -> HTTP 200
+
+=== Compliance ===
+  [PASS] GET /compliance/aml-flags -> HTTP 200
+         AML flags found: 2
+  [PASS] GET /compliance/ctr-reports -> HTTP 200
+         CTR reports found: 2
+
+=== Loans ===
+  [PASS] POST /api/loans/ (expect 422 ù account < 6 months) -> HTTP 422
+
+==================================================
+  OVERALL: SOME TESTS FAILED
+==================================================
+
