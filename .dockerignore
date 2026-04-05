@@ -1,0 +1,37 @@
+# Python artifacts
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Virtual environment — never copy this into the image!
+venv/
+env/
+.venv/
+
+# Secrets & local config — must be provided via environment variables in Docker
+.env
+banking.db
+*.sqlite3
+
+# Development/temp files
+*.log
+test_results.txt
+db_inspection*.txt
+inspect_db.py
+smoke_test.py
+
+# Git
+.git
+.gitignore
+
+# IDE files
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db

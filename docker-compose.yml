@@ -1,0 +1,86 @@
+version: "3.9"
+
+services:
+
+  # ─── PostgreSQL Database ─────────────────────────────────────────────────────
+  db:
+    image: postgres:16-alpine
+    container_name: banking_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-banking_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-banking_pass}
+      POSTGRES_DB: ${POSTGRES_DB:-banking_db}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data   # Persistent data survives container restarts
+    ports:
+      - "5432:5432"     # Exposed so you can connect with pgAdmin or DBeaver locally
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-banking_user} -d ${POSTGRES_DB:-banking_db}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - banking_network
+
+  # ─── FastAPI Application ─────────────────────────────────────────────────────
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: banking_app
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy   # Wait until PostgreSQL passes its health check
+    environment:
+      # Override DATABASE_URL to point to the postgres container (use service name 'db')
+      DATABASE_URL: postgresql://${POSTGRES_USER:-banking_user}:${POSTGRES_PASSWORD:-banking_pass}@db:5432/${POSTGRES_DB:-banking_db}
+      SECRET_KEY: ${SECRET_KEY}
+      FERNET_KEY: ${FERNET_KEY}
+      ALGORITHM: ${ALGORITHM:-HS256}
+      ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-30}
+      # Banking rules
+      SAVINGS_MIN_BALANCE: ${SAVINGS_MIN_BALANCE:-100000}
+      CURRENT_MIN_BALANCE: ${CURRENT_MIN_BALANCE:-500000}
+      FD_MIN_BALANCE: ${FD_MIN_BALANCE:-1000000}
+      SAVINGS_DAILY_WITHDRAWAL: ${SAVINGS_DAILY_WITHDRAWAL:-5000000}
+      CURRENT_DAILY_WITHDRAWAL: ${CURRENT_DAILY_WITHDRAWAL:-20000000}
+      AML_THRESHOLD: ${AML_THRESHOLD:-100000000}
+      CTR_THRESHOLD: ${CTR_THRESHOLD:-5000000}
+      MAX_LOGIN_ATTEMPTS: ${MAX_LOGIN_ATTEMPTS:-3}
+      LOCKOUT_MINUTES: ${LOCKOUT_MINUTES:-15}
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/app    # Dev-mode hot reload: mount source so changes reflect without rebuild
+    networks:
+      - banking_network
+
+  # ─── pgAdmin (Optional GUI for DB exploration) ───────────────────────────────
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: banking_pgadmin
+    restart: unless-stopped
+    profiles:
+      - tools     # Only starts when you run: docker compose --profile tools up
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@bank.local
+      PGADMIN_DEFAULT_PASSWORD: admin1234
+    ports:
+      - "5050:80"
+    depends_on:
+      - db
+    networks:
+      - banking_network
+
+# ─── Named Volumes ────────────────────────────────────────────────────────────
+volumes:
+  postgres_data:
+    driver: local
+
+# ─── Networks ─────────────────────────────────────────────────────────────────
+networks:
+  banking_network:
+    driver: bridge
