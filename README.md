@@ -22,6 +22,7 @@
 8. [API Endpoints Reference](#8-api-endpoints-reference)
 9. [Inspecting the Database](#9-inspecting-the-database)
 10. [Banking Rules Quick Reference](#10-banking-rules-quick-reference)
+11. [Unit Tests (pytest)](#11-unit-tests-pytest)
 
 ---
 
@@ -379,6 +380,194 @@ FastAPI generates a fully interactive API explorer at **http://localhost:8000/do
 | Loan min account age | 6 months | `loan_service.py` |
 | AML threshold | ₹10,00,000 | `aml_checker.py` |
 | CTR threshold | ₹50,000 | `aml_checker.py` |
+
+---
+
+## 11. Unit Tests (pytest)
+
+### Why Unit Tests?
+
+Banking software is exception-intolerant. A single regression — an unchecked withdrawal breaching minimum balance, a KYC bypass, a loan approved for an unverified customer — could cause real financial and legal damage at scale.
+
+Unit tests act as an **automated safety net** that:
+- Verifies every business rule is enforced correctly, every time
+- Catches breaking changes introduced during new feature development
+- Documents exactly what the system is supposed to do (tests are living specifications)
+- Enables confident refactoring without fear of silent regressions
+
+---
+
+### Why pytest?
+
+| Choice | Reason |
+|:---|:---|
+| **pytest** | Python's most widely used testing framework — clean syntax, powerful fixtures, rich plugin ecosystem |
+| **FastAPI TestClient** | Runs the full application stack against a real HTTP client without needing a live server |
+| **In-memory SQLite** | Each test run uses a fresh, isolated database — no leftover data from previous tests |
+| **Dependency Override** | FastAPI's `app.dependency_overrides` replaces the production DB with the test DB without changing any app code |
+| **pytest-cov** | Measures which lines of code are covered by tests, identifying untested paths |
+
+---
+
+### How Tests Are Isolated (The Key Mechanism)
+
+This is the most critical design decision in the test suite:
+
+```python
+# conftest.py
+
+# 1. Create a separate in-memory SQLite engine — never touches banking.db
+engine = create_engine("sqlite:///:memory:", poolclass=StaticPool)
+
+# 2. Override FastAPI's DB dependency for all tests
+def override_get_db():
+    db = TestingSessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+app.dependency_overrides[get_db] = override_get_db
+
+# 3. Wipe all table data automatically between every single test
+@pytest.fixture(autouse=True)
+def clean_tables():
+    yield
+    for table in reversed(Base.metadata.sorted_tables):
+        db.execute(table.delete())
+    db.commit()
+```
+
+**Result:** Every test starts with a perfectly empty database. Test A's data can never bleed into Test B.
+
+---
+
+### Test File Structure
+
+```
+tests/
+├── __init__.py              ← Makes tests/ a Python package
+├── conftest.py              ← Shared fixtures (DB setup, tokens, verified customer, accounts)
+├── test_auth.py             ← 16 tests — login, lockout, RBAC, user creation
+├── test_customers.py        ← 21 tests — KYC workflow, age gate, duplicate detection
+├── test_accounts.py         ← 15 tests — account types, min balance, freeze/close
+├── test_transactions.py     ← 25 tests — deposit, withdrawal, transfers, AML/CTR
+└── test_loans.py            ← 12 tests — eligibility, approval workflow, EMI math
+```
+
+**Total: 89 tests — all passing ✅**
+
+---
+
+### What Each Test Module Covers
+
+#### `test_auth.py` — Authentication & Security
+| Test | What It Proves |
+|:---|:---|
+| `test_login_success` | Valid credentials return a JWT token |
+| `test_login_wrong_password` | Wrong password returns 401 |
+| `test_brute_force_lockout` | 3 failed attempts locks the account (403) |
+| `test_teller_cannot_create_users` | RBAC blocks Tellers from admin endpoints |
+| `test_get_me_invalid_token` | Garbage JWT tokens are rejected |
+
+#### `test_customers.py` — KYC Onboarding
+| Test | What It Proves |
+|:---|:---|
+| `test_under_18_rejected` | Age < 18 is blocked at the service layer |
+| `test_duplicate_national_id_rejected` | SHA-256 hash comparison catches duplicates |
+| `test_manager_can_verify_kyc` | Only MANAGER+ can approve KYC status |
+| `test_cannot_revert_verified_to_pending` | KYC state machine is unidirectional |
+| `test_delete_customer_with_accounts_blocked` | Guard prevents deleting active customers |
+
+#### `test_accounts.py` — Account Management
+| Test | What It Proves |
+|:---|:---|
+| `test_savings_below_min_balance_rejected` | ₹1,000 floor enforced on Savings |
+| `test_fd_below_min_balance_rejected` | ₹10,000 floor enforced on Fixed Deposits |
+| `test_unverified_customer_cannot_open_account` | PENDING KYC blocks account opening |
+| `test_manager_can_freeze_account` | Only MANAGER+ can change account status |
+
+#### `test_transactions.py` — Transaction Engine
+| Test | What It Proves |
+|:---|:---|
+| `test_withdrawal_below_min_balance_rejected` | Minimum balance floor prevents overdraft |
+| `test_withdrawal_exact_minimum_balance_allowed` | Withdrawing to exactly ₹1,000 is permitted |
+| `test_transfer_between_accounts` | Source decreases and destination increases atomically |
+| `test_self_transfer_rejected` | Cannot transfer to the same account |
+| `test_large_deposit_triggers_aml_flag` | Deposits > ₹10,00,000 auto-flag AML |
+| `test_large_deposit_triggers_ctr_report` | Deposits > ₹50,000 auto-generate CTR |
+| `test_deposit_on_frozen_account_blocked` | FROZEN accounts cannot transact |
+
+#### `test_loans.py` — Loan Lifecycle
+| Test | What It Proves |
+|:---|:---|
+| `test_loan_rejected_account_too_new` | Accounts < 6 months old cannot back a loan |
+| `test_manager_can_approve_loan` | Only MANAGER+ approves loan applications |
+| `test_emi_is_positive_and_reasonable` | EMI formula outputs match expected ₹8,885 range |
+| `test_emi_schedule_sum_covers_principal_plus_interest` | Total payable > principal (interest is applied) |
+
+---
+
+### How to Run the Tests
+
+#### Prerequisites
+Ensure dependencies are installed:
+```bash
+pip install -r requirements.txt
+```
+
+#### Run All Tests
+```bash
+python -m pytest tests/ -v
+```
+
+#### Run a Specific File
+```bash
+python -m pytest tests/test_transactions.py -v
+python -m pytest tests/test_auth.py -v
+python -m pytest tests/test_customers.py -v
+```
+
+#### Run a Specific Test Class
+```bash
+python -m pytest tests/test_customers.py::TestKYCWorkflow -v
+python -m pytest tests/test_transactions.py::TestAMLAndCTR -v
+python -m pytest tests/test_loans.py::TestEMICalculation -v
+```
+
+#### Run a Single Test
+```bash
+python -m pytest tests/test_auth.py::TestLogin::test_brute_force_lockout -v
+python -m pytest tests/test_transactions.py::TestWithdrawal::test_withdrawal_below_min_balance_rejected -v
+```
+
+#### Run with Coverage Report
+```bash
+python -m pytest tests/ --cov=. --cov-report=term-missing
+```
+This shows exactly which lines of your services and routes are covered by tests.
+
+#### Run with Short Summary (fast output)
+```bash
+python -m pytest tests/ -q
+```
+
+---
+
+### Expected Output
+
+A successful run produces:
+```
+tests/test_accounts.py::TestOpenAccount::test_open_savings_account PASSED     [  1%]
+tests/test_accounts.py::TestOpenAccount::test_open_current_account PASSED     [  2%]
+...
+tests/test_transactions.py::TestAMLAndCTR::test_large_deposit_triggers_aml_flag PASSED  [ 93%]
+tests/test_transactions.py::TestAMLAndCTR::test_large_deposit_triggers_ctr_report PASSED [ 94%]
+...
+=================== 89 passed in 105.64s (0:01:45) ===================
+```
+
+> 💡 **Tests run against an in-memory SQLite database and never touch your real `banking.db` or PostgreSQL database.** They are completely safe to run at any time.
 
 ---
 
