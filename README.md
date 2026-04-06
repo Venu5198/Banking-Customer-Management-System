@@ -23,6 +23,9 @@
 9. [Inspecting the Database](#9-inspecting-the-database)
 10. [Banking Rules Quick Reference](#10-banking-rules-quick-reference)
 11. [Unit Tests (pytest)](#11-unit-tests-pytest)
+    - [Auto-Run Tests on File Save](#auto-run-tests-on-file-save)
+    - [GitHub Actions CI](#github-actions-ci)
+    - [Run Tests Inside Docker](#run-tests-inside-docker)
 
 ---
 
@@ -568,6 +571,136 @@ tests/test_transactions.py::TestAMLAndCTR::test_large_deposit_triggers_ctr_repor
 ```
 
 > 💡 **Tests run against an in-memory SQLite database and never touch your real `banking.db` or PostgreSQL database.** They are completely safe to run at any time.
+
+---
+
+### Auto-Run Tests on File Save
+
+**What it is:** Instead of manually running `pytest` after every code change, `pytest-watch` monitors your project folder for saved changes and re-runs the full test suite automatically in the background.
+
+**Why it matters:** This creates an instant feedback loop — a red failure appears within seconds of you writing a bug, rather than discovering it later during a manual run.
+
+**How it works:**
+`pytest-watch` (installed via `requirements.txt`) uses filesystem event listeners to detect when any `.py` file changes. The moment you hit **Save** in your editor, it triggers a fresh `pytest` run and prints the results directly in the terminal.
+
+**How to run it:**
+```bash
+# Start the file watcher — it runs until you press Ctrl+C
+python -m pytest_watch tests/ -- --tb=short -q
+```
+
+**What you will see in the terminal:**
+```
+[pytest-watch] Starting...
+[pytest-watch] Running: pytest tests/ --tb=short -q
+
+89 passed in 102.54s
+
+[pytest-watch] Watching for changes in: tests/, models/, services/, routes/
+# ...Save any file...
+[pytest-watch] Change detected! Re-running tests...
+
+89 passed in 104.12s
+```
+
+> ⚠️ On Windows, use `python -m pytest_watch` instead of just `ptw` if the `ptw` command is not found on your system PATH.
+
+---
+
+### GitHub Actions CI
+
+**What it is:** A cloud pipeline that automatically runs all 89 tests on GitHub's servers every time you push code to the repository or open a Pull Request — without you doing anything manually.
+
+**Why it matters:** It prevents broken code from being merged into `main`. If you push a change that breaks a business rule (e.g., removes the minimum balance check), the pipeline goes red before anyone merges it. It is the standard practice in professional software teams.
+
+**How it works:**
+The file `.github/workflows/tests.yml` defines the pipeline. GitHub reads this file on every `git push` and executes the steps automatically on its cloud servers:
+
+```
+push to main branch
+       ↓
+GitHub Actions triggers
+       ↓
+  Checkout code
+       ↓
+  Set up Python 3.11 & 3.12 (matrix — runs in parallel)
+       ↓
+  pip install -r requirements.txt
+       ↓
+  python generate_env.py  ← generates fresh crypto keys for CI
+       ↓
+  pytest tests/ --cov=. --cov-report=xml
+       ↓
+  ✅ All 89 passed → Green checkmark on GitHub
+  ❌ Any failure  → Red X, email notification, PR blocked
+```
+
+**Triggers:**
+- Every `git push` to `main` or `develop`
+- Every Pull Request targeting `main` or `develop`
+
+**How to view the results:**
+1. Go to your repository on GitHub
+2. Click the **Actions** tab
+3. Click the latest workflow run to see per-job logs and test output
+
+**Current CI status:** ✅ **Run Tests #1 — Passed (2m 28s)** on Python 3.11 and 3.12
+
+**To re-trigger manually:**
+```bash
+git commit --allow-empty -m "trigger CI"
+git push
+```
+
+---
+
+### Run Tests Inside Docker
+
+**What it is:** Running the entire pytest suite inside a Docker container, isolated from your local machine's Python environment — exactly as it would run on a production server or in CI.
+
+**Why it matters:** It guarantees that the tests pass in a clean, reproducible environment regardless of what Python packages you have installed locally. It answers the common question *"works on my machine but fails in CI"*.
+
+**How it works:**
+The `docker-compose.yml` defines a dedicated `test` service that:
+1. Builds the same Docker image used for the app
+2. Mounts the source code so you don't need to rebuild the image on every code change
+3. Generates fresh `.env` secrets at runtime
+4. Runs `pytest` against an **in-memory SQLite** database — no PostgreSQL dependency required
+5. Removes the container automatically after the run (`--rm` flag)
+
+```yaml
+# What the test service does inside Docker:
+sh -c "python generate_env.py && python -m pytest tests/ --tb=short -v"
+```
+
+**How to run it:**
+```bash
+# Run the full test suite inside Docker (exits when done)
+docker-compose --profile test run --rm test
+```
+
+**What you will see:**
+```
+[+] Building 2.3s (complete)
+Creating banking_test ... done
+SUCCESS: .env created
+
+tests/test_accounts.py::TestOpenAccount::test_open_savings_account PASSED [  1%]
+tests/test_accounts.py::TestOpenAccount::test_open_current_account PASSED [  2%]
+...
+=================== 89 passed in 108.41s ===================
+```
+
+> ⚠️ **Note:** The Docker test service uses `DATABASE_URL=sqlite:///./banking_test.db` so it **never connects to your PostgreSQL container**. It is completely self-contained and will not affect any live data.
+
+**Comparison table:**
+
+| Method | When to Use | DB Used | Speed |
+|:---|:---|:---|:---|
+| `pytest tests/ -v` | During active development | In-memory SQLite | Fastest |
+| `python -m pytest_watch` | Continuous development feedback | In-memory SQLite | Auto on save |
+| `docker-compose --profile test run --rm test` | Before pushing / environment validation | SQLite in container | Moderate |
+| GitHub Actions | Automatic on every push/PR | In-memory SQLite (CI) | Cloud (parallel) |
 
 ---
 
