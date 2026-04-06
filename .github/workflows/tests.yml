@@ -1,0 +1,67 @@
+# ─── Banking App CI Pipeline ─────────────────────────────────────────────────
+# Runs all 89 pytest tests automatically on every push and pull request.
+# Uses an in-memory SQLite DB — no external services needed.
+
+name: 🧪 Run Tests
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  test:
+    name: pytest — Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]   # test against two Python versions
+
+    steps:
+
+      # ── 1. Checkout Code ──────────────────────────────────────────────────
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+
+      # ── 2. Set Up Python ──────────────────────────────────────────────────
+      - name: 🐍 Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: "pip"          # cache pip downloads across runs
+
+      # ── 3. Install Dependencies ───────────────────────────────────────────
+      - name: 📦 Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # ── 4. Generate .env with Test Secrets ───────────────────────────────
+      # The app requires SECRET_KEY and FERNET_KEY at import time.
+      # We generate fresh cryptographic keys for each CI run.
+      - name: 🔑 Generate test environment file
+        run: python generate_env.py
+
+      # ── 5. Run Tests with Coverage ────────────────────────────────────────
+      - name: 🧪 Run pytest with coverage
+        run: |
+          python -m pytest tests/ \
+            --tb=short \
+            --cov=. \
+            --cov-report=term-missing \
+            --cov-report=xml:coverage.xml \
+            -q
+        env:
+          # Use SQLite for CI — no PostgreSQL needed
+          DATABASE_URL: "sqlite:///./banking_test.db"
+
+      # ── 6. Upload Coverage Report ─────────────────────────────────────────
+      - name: 📊 Upload coverage to Codecov
+        if: matrix.python-version == '3.11'   # upload only once
+        uses: codecov/codecov-action@v4
+        with:
+          file: coverage.xml
+          fail_ci_if_error: false   # don't fail build if codecov upload fails
+        continue-on-error: true
